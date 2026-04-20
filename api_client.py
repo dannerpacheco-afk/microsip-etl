@@ -82,14 +82,19 @@ class MicrosipClient:
             skip += self.page_size
             time.sleep(0.1)  # respect rate limit (120 req/min)
 
+    # HTTP status codes that should trigger a retry with backoff.
+    # 429 = rate limited; 5xx = transient server errors (upstream DB
+    # timeouts, worker crashes, etc.) common with heavy Firebird queries.
+    _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
     def _request_with_retry(
-        self, url: str, params: dict, max_retries: int = 3
+        self, url: str, params: dict, max_retries: int = 5
     ) -> httpx.Response:
-        """Make GET request with retry on 429 (rate limited).
+        """Make GET request with retry on rate-limit and transient 5xx errors.
 
         Raises:
-            httpx.HTTPStatusError: If all retries are exhausted (429) or
-                the server returns a non-2xx status code.
+            httpx.HTTPStatusError: If all retries are exhausted or the
+                server returns a non-retryable non-2xx status code.
         """
         if max_retries < 1:
             raise ValueError("max_retries must be >= 1")
@@ -99,7 +104,7 @@ class MicrosipClient:
             response = self._client.get(url, params=params)
             last_response = response
 
-            if response.status_code == 429:
+            if response.status_code in self._RETRYABLE_STATUS:
                 wait = min(2**attempt, 30)  # cap backoff at 30s
                 retry_after = response.headers.get("Retry-After")
                 if retry_after:
@@ -108,8 +113,10 @@ class MicrosipClient:
                     except ValueError:
                         pass
                 logger.warning(
-                    "Rate limited (429), waiting %ds before retry "
+                    "Transient error %d from %s, waiting %ds before retry "
                     "(attempt %d/%d)...",
+                    response.status_code,
+                    url,
                     wait,
                     attempt + 1,
                     max_retries,
@@ -120,10 +127,11 @@ class MicrosipClient:
             response.raise_for_status()
             return response
 
-        # All retries exhausted — raise the last 429 as an error
+        # All retries exhausted
         assert last_response is not None  # always set when max_retries >= 1
         raise httpx.HTTPStatusError(
-            f"Rate limited after {max_retries} retries",
+            f"Request failed after {max_retries} retries "
+            f"(last status: {last_response.status_code})",
             request=last_response.request,
             response=last_response,
         )
