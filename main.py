@@ -5,9 +5,15 @@ from __future__ import annotations
 import logging
 import sys
 
-from api_client import MicrosipClient
-from bq_loader import BigQueryLoader
-from config import settings
+from dotenv import load_dotenv
+
+# Load .env BEFORE importing google-cloud-bigquery so
+# GOOGLE_APPLICATION_CREDENTIALS is available in os.environ.
+load_dotenv()
+
+from api_client import MicrosipClient  # noqa: E402
+from bq_loader import BigQueryLoader  # noqa: E402
+from config import settings  # noqa: E402
 from pipeline import Pipeline
 from sync_state import SyncStateManager
 

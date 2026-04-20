@@ -1,0 +1,37 @@
+# docker-compose.yml for Microsip ETL
+# ====================================
+#
+# The ETL is a one-shot job (runs, loads data to BigQuery, exits).
+# The Microsip API runs in its own compose project and exposes port
+# 8000 on the host. This compose reaches it via host.docker.internal.
+#
+# Usage:
+#   docker compose build                              # build once
+#   docker compose run --rm etl catalogs              # test catalogs only
+#   docker compose run --rm etl transactions          # test transactions
+#   docker compose run --rm etl snapshots             # test snapshots
+#   docker compose run --rm etl                       # run all
+#
+# For the daily cron job, add this to the host's crontab:
+#   0 6 * * * cd /path/to/microsip-etl && docker compose run --rm etl >> /var/log/microsip-etl.log 2>&1
+
+services:
+  etl:
+    build: .
+    image: microsip-etl:latest
+    env_file:
+      - .env
+    environment:
+      # Override MICROSIP_API_URL from .env so the container reaches the
+      # API running on the host (extra_hosts maps host.docker.internal to
+      # the host gateway on Linux; Docker Desktop provides it natively).
+      MICROSIP_API_URL: http://host.docker.internal:8000/api/v1
+      # Path inside the container where credentials.json will be mounted
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials.json
+    extra_hosts:
+      # Required on Linux hosts to resolve host.docker.internal
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Mount GCP service account credentials read-only.
+      # credentials.json is gitignored and never copied into the image.
+      - ./credentials.json:/app/credentials.json:ro
