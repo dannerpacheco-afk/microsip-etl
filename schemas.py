@@ -23,6 +23,9 @@ class TableConfig:
     partition_field: str = ""
     clustering_fields: list[str] = field(default_factory=list)
     api_params: dict = field(default_factory=dict)
+    # Optional overrides to handle problematic endpoints
+    page_size: int | None = None  # None = use MicrosipClient default
+    skip_failed_pages: bool = False  # tolerate page-level failures
 
 
 # --- Catalog tables (full refresh) ---
@@ -37,6 +40,12 @@ CATALOGS: list[TableConfig] = [
         bq_table="dim_articulos",
         endpoint="/articulos",
         strategy="full_refresh",
+        # Some rows have characters that Firebird cannot transliterate to
+        # WIN1252 (charset mismatch), causing the API to 502 on those pages.
+        # Smaller pages limit the blast radius — only the page containing
+        # a bad row fails, the rest load successfully.
+        page_size=100,
+        skip_failed_pages=True,
     ),
     TableConfig(
         bq_table="dim_almacenes",
