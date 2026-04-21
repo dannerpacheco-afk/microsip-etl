@@ -98,57 +98,140 @@ def _scan_pages(
     return all_bad
 
 
+def _group_consecutive(offsets: list[int]) -> list[list[int]]:
+    """Group a sorted list of ints into sublists of consecutive runs."""
+    if not offsets:
+        return []
+    groups: list[list[int]] = []
+    current: list[int] = [offsets[0]]
+    for x in offsets[1:]:
+        if x == current[-1] + 1:
+            current.append(x)
+        else:
+            groups.append(current)
+            current = [x]
+    groups.append(current)
+    return groups
+
+
+def _probe_id(client: httpx.Client, articulo_id: int) -> int:
+    """Return HTTP status for GET /articulos/{id}."""
+    response = client.get(
+        f"{settings.microsip_api_url}/articulos/{articulo_id}",
+    )
+    return response.status_code
+
+
+def _find_exact_bad_ids(
+    client: httpx.Client, low_id: int, high_id: int
+) -> list[int]:
+    """Test each ARTICULO_ID in (low_id, high_id) via GET /articulos/{id}.
+
+    Returns IDs that return 500/502 (transliteration failure).
+    """
+    bad_ids: list[int] = []
+    total = high_id - low_id - 1
+    for i, articulo_id in enumerate(range(low_id + 1, high_id), start=1):
+        status = _probe_id(client, articulo_id)
+        if status in (500, 502):
+            bad_ids.append(articulo_id)
+            logger.info(
+                "    [%d/%d] ARTICULO_ID=%d → %d BAD",
+                i,
+                total,
+                articulo_id,
+                status,
+            )
+        # 404 = ID doesn't exist (gap in the sequence), skip silently
+        # 200 = OK, skip silently
+    return bad_ids
+
+
 def _report(client: httpx.Client, bad_offsets: list[int]) -> None:
-    """Fetch neighbor articles for each bad offset and print a summary."""
+    """Group bad offsets into consecutive runs and find exact IDs."""
     if not bad_offsets:
         logger.info("")
-        logger.info("No bad articles found. ")
+        logger.info("No bad articles found.")
         return
+
+    groups = _group_consecutive(sorted(bad_offsets))
 
     logger.info("")
     logger.info("=" * 70)
-    logger.info("SUMMARY: %d bad article(s) found", len(bad_offsets))
+    logger.info(
+        "Found %d bad article(s) in %d group(s). Scanning exact IDs...",
+        len(bad_offsets),
+        len(groups),
+    )
     logger.info("=" * 70)
 
-    for pos in sorted(bad_offsets):
-        before = _get_articulo(client, pos - 1) if pos > 0 else None
-        after = _get_articulo(client, pos + 1)
+    # Silence httpx while we probe individual IDs (too many calls)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    all_exact: list[tuple[list[int], int, int]] = []
+    for group in groups:
+        first = group[0]
+        last = group[-1]
+        before = _get_articulo(client, first - 1) if first > 0 else None
+        after = _get_articulo(client, last + 1)
+        prev_id = before.get("ARTICULO_ID") if before else None
+        next_id = after.get("ARTICULO_ID") if after else None
 
         logger.info("")
-        logger.info("Bad article at skip=%d:", pos)
-
+        logger.info(
+            "Group: skip=%s → %d bad row(s) between ID %s and ID %s",
+            group,
+            len(group),
+            prev_id,
+            next_id,
+        )
         if before:
             logger.info(
-                "  ← Previous (skip=%d): ARTICULO_ID=%s  NOMBRE=%r",
-                pos - 1,
-                before.get("ARTICULO_ID"),
+                "  ← Prev OK (ID=%s): %s",
+                prev_id,
                 str(before.get("NOMBRE", ""))[:60],
             )
         if after:
             logger.info(
-                "  → Next     (skip=%d): ARTICULO_ID=%s  NOMBRE=%r",
-                pos + 1,
-                after.get("ARTICULO_ID"),
+                "  → Next OK (ID=%s): %s",
+                next_id,
                 str(after.get("NOMBRE", ""))[:60],
             )
 
-        if before and after:
-            prev_id = before.get("ARTICULO_ID")
-            next_id = after.get("ARTICULO_ID")
-            logger.info(
-                "  >> The bad article has ARTICULO_ID between %s and %s",
-                prev_id,
-                next_id,
-            )
+        if prev_id is None or next_id is None:
+            logger.warning("  (Cannot scan — missing neighbor ID)")
+            continue
+
+        logger.info(
+            "  Probing %d candidate IDs...", next_id - prev_id - 1
+        )
+        exact = _find_exact_bad_ids(client, prev_id, next_id)
+        logger.info("  → Exact bad ARTICULO_IDs: %s", exact)
+        all_exact.append((exact, prev_id, next_id))
+
+    # Re-enable httpx logging
+    logging.getLogger("httpx").setLevel(logging.INFO)
+
+    # Final consolidated list
+    flat = [aid for group_result in all_exact for aid in group_result[0]]
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("FINAL LIST — %d bad ARTICULO_ID(s) to fix in Microsip:", len(flat))
+    logger.info("=" * 70)
+    for aid in flat:
+        logger.info("  %d", aid)
 
     logger.info("")
     logger.info("Next steps:")
     logger.info("  1. Open Microsip → Inventarios → Catalogos → Articulos")
-    logger.info("  2. Find each bad ARTICULO_ID range listed above")
-    logger.info("  3. Look for weird characters in NOMBRE, OBSERVACIONES,")
-    logger.info("     or other text fields (smart quotes, em-dashes,")
-    logger.info("     emojis, ™, ©, etc.) and replace with plain equivalents")
-    logger.info("  4. Save and re-run 'docker compose run --rm etl catalogs'")
+    logger.info("  2. Find each ARTICULO_ID above and inspect text fields")
+    logger.info("     (NOMBRE, OBSERVACIONES, CLAVES, NOTAS) for weird")
+    logger.info("     characters: smart quotes, em-dashes, emojis, ™, ©, etc.")
+    logger.info("  3. Replace them with plain equivalents and save")
+    logger.info("  4. Re-run 'docker compose run --rm etl find-bad-articulos'")
+    logger.info("     to confirm all are fixed (should report 0 bad).")
+    logger.info("  5. Then re-run 'docker compose run --rm etl catalogs' to")
+    logger.info("     load the full articulos catalog into BigQuery.")
 
 
 def run() -> None:
