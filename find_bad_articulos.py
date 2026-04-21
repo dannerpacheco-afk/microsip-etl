@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 
 import httpx
 
@@ -28,10 +29,50 @@ logger = logging.getLogger(__name__)
 DEFAULT_BAD_PAGES = [1100, 4800, 6200, 7600, 10200]
 PAGE_WIDTH = 100
 
+# API rate limit is 120 req/min. Stay at ~100 req/min (~0.6s per request)
+# to leave headroom for bursts and avoid hitting 429s.
+RATE_LIMIT_DELAY_SEC = 0.6
+
+
+def _request(
+    client: httpx.Client,
+    url: str,
+    params: dict | None = None,
+    max_retries: int = 5,
+) -> httpx.Response:
+    """GET with rate-limit retry + a small delay between calls.
+
+    Returns the response even if it's non-2xx (caller checks status).
+    Retries automatically on 429, honoring Retry-After when present.
+    """
+    for attempt in range(max_retries):
+        response = client.get(url, params=params)
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            try:
+                wait = int(retry_after) if retry_after else 2**attempt
+            except ValueError:
+                wait = 2**attempt
+            wait = min(wait, 30)
+            logger.info(
+                "Rate limited (429), waiting %ds (attempt %d/%d)...",
+                wait,
+                attempt + 1,
+                max_retries,
+            )
+            time.sleep(wait)
+            continue
+        time.sleep(RATE_LIMIT_DELAY_SEC)
+        return response
+    # Exhausted retries — return whatever the last response was
+    time.sleep(RATE_LIMIT_DELAY_SEC)
+    return response
+
 
 def _get_status(client: httpx.Client, skip: int, limit: int) -> int:
     """Return HTTP status code for a single /articulos page request."""
-    response = client.get(
+    response = _request(
+        client,
         f"{settings.microsip_api_url}/articulos",
         params={"limit": limit, "skip": skip, "include_total": "false"},
     )
@@ -39,8 +80,9 @@ def _get_status(client: httpx.Client, skip: int, limit: int) -> int:
 
 
 def _get_articulo(client: httpx.Client, skip: int) -> dict | None:
-    """Fetch a single articulo at the given skip, or None if 502."""
-    response = client.get(
+    """Fetch a single articulo at the given skip, or None if non-200."""
+    response = _request(
+        client,
         f"{settings.microsip_api_url}/articulos",
         params={"limit": 1, "skip": skip, "include_total": "false"},
     )
@@ -116,7 +158,8 @@ def _group_consecutive(offsets: list[int]) -> list[list[int]]:
 
 def _probe_id(client: httpx.Client, articulo_id: int) -> int:
     """Return HTTP status for GET /articulos/{id}."""
-    response = client.get(
+    response = _request(
+        client,
         f"{settings.microsip_api_url}/articulos/{articulo_id}",
     )
     return response.status_code
