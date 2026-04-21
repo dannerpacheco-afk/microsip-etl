@@ -17,7 +17,13 @@ from config import settings  # noqa: E402
 from pipeline import Pipeline
 from sync_state import SyncStateManager
 
-TARGETS = ("all", "catalogs", "transactions", "snapshots")
+TARGETS = (
+    "all",
+    "catalogs",
+    "transactions",
+    "snapshots",
+    "find-bad-articulos",
+)
 
 
 def main():
@@ -31,6 +37,12 @@ def main():
     if target not in TARGETS:
         print(f"Usage: python main.py [{' | '.join(TARGETS)}]")
         sys.exit(1)
+
+    # Diagnostic tool — runs without touching BigQuery
+    if target == "find-bad-articulos":
+        from find_bad_articulos import run as find_bad_run
+        find_bad_run()
+        return
 
     with MicrosipClient(
         settings.microsip_api_url,
