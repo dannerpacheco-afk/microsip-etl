@@ -1,15 +1,21 @@
 """Locate Microsip articulos that cause 502 errors.
 
-Uses binary search within each known-bad page to find the exact skip
-offset(s) that return 502 Bad Gateway. For each bad offset, reports
-the ARTICULO_ID of the previous and next articles so the user can
-find the bad one in Microsip and fix its character encoding.
+Diagnostic tool. The API now CASTs ARTICULOS.NOMBRE to OCTETS to
+work around the ISO8859_1 → WIN1252 transliteration that used to
+break pagination, so a clean run should report "No bad articles
+found". If similar charset issues resurface (e.g. a different
+column gets bad bytes), this script binary-searches the catalog,
+narrows the failure to specific skip offsets, then probes
+individual ARTICULO_IDs via GET /articulos/{id} to identify the
+exact records to fix in Microsip.
 
 Usage:
     docker compose run --rm etl find-bad-articulos
+        Scans the full ARTICULOS catalog (default 0 → 15000).
 
-Or to scan a custom range (start end, in skip units):
-    docker compose run --rm etl find-bad-articulos 0 12000
+    docker compose run --rm etl find-bad-articulos <start> <end>
+        Scans a custom skip range, e.g.:
+            docker compose run --rm etl find-bad-articulos 0 5000
 """
 
 from __future__ import annotations
@@ -24,9 +30,10 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Known bad pages from the last ETL run (page_size=100 each).
+# Default upper bound for the full-catalog scan. The catalog has ~12k
+# articulos today; 15k leaves room for growth without missing rows.
 # Override by passing start/end as CLI args.
-DEFAULT_BAD_PAGES = [1100, 4800, 6200, 7600, 10200]
+DEFAULT_SCAN_END = 15_000
 PAGE_WIDTH = 100
 
 # API rate limit is 120 req/min. Stay at ~100 req/min (~0.6s per request)
@@ -284,45 +291,40 @@ def run() -> None:
 
     if len(args) == 2:
         start, end = int(args[0]), int(args[1])
-        # Full range: scan in smaller chunks to avoid one giant binary search
-        pages = [
-            (s, min(s + PAGE_WIDTH, end))
-            for s in range(start, end, PAGE_WIDTH)
-        ]
-        # Filter to only pages that actually return 502 before drilling down
-        logger.info(
-            "Scanning full range [%d, %d) in %d chunks of %d...",
-            start,
-            end,
-            len(pages),
-            PAGE_WIDTH,
-        )
-        with httpx.Client(
-            headers={"X-API-Key": settings.microsip_api_key},
-            timeout=60.0,
-        ) as client:
-            bad_pages = []
-            for p_start, p_end in pages:
-                status = _get_status(client, p_start, limit=p_end - p_start)
-                if status != 200:
-                    bad_pages.append((p_start, p_end))
-            logger.info("Found %d bad page(s): %s", len(bad_pages), bad_pages)
-
-            bad_offsets = _scan_pages(client, bad_pages)
-            _report(client, bad_offsets)
     else:
-        # Default: use the 5 known bad pages from the previous run
-        pages = [(s, s + PAGE_WIDTH) for s in DEFAULT_BAD_PAGES]
-        logger.info(
-            "Using default bad pages from previous run: %s", DEFAULT_BAD_PAGES
-        )
-        logger.info("(Pass 'start end' as args to scan a different range)")
-        with httpx.Client(
-            headers={"X-API-Key": settings.microsip_api_key},
-            timeout=60.0,
-        ) as client:
-            bad_offsets = _scan_pages(client, pages)
-            _report(client, bad_offsets)
+        start, end = 0, DEFAULT_SCAN_END
+
+    pages = [
+        (s, min(s + PAGE_WIDTH, end))
+        for s in range(start, end, PAGE_WIDTH)
+    ]
+    logger.info(
+        "Scanning range [%d, %d) in %d chunks of %d...",
+        start,
+        end,
+        len(pages),
+        PAGE_WIDTH,
+    )
+
+    with httpx.Client(
+        headers={"X-API-Key": settings.microsip_api_key},
+        timeout=60.0,
+    ) as client:
+        # First pass: identify which chunks fail. With the API charset
+        # fix in place this should typically be empty.
+        bad_pages: list[tuple[int, int]] = []
+        for p_start, p_end in pages:
+            status = _get_status(client, p_start, limit=p_end - p_start)
+            if status != 200:
+                bad_pages.append((p_start, p_end))
+
+        if not bad_pages:
+            logger.info("All %d chunks returned 200. No bad articles found.", len(pages))
+            return
+
+        logger.info("Found %d bad chunk(s): %s", len(bad_pages), bad_pages)
+        bad_offsets = _scan_pages(client, bad_pages)
+        _report(client, bad_offsets)
 
 
 if __name__ == "__main__":

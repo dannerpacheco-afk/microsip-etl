@@ -40,12 +40,14 @@ CATALOGS: list[TableConfig] = [
         bq_table="dim_articulos",
         endpoint="/articulos",
         strategy="full_refresh",
-        # Some rows have characters that Firebird cannot transliterate to
-        # WIN1252 (charset mismatch), causing the API to 502 on those pages.
-        # Smaller pages limit the blast radius — only the page containing
-        # a bad row fails, the rest load successfully.
-        page_size=100,
-        skip_failed_pages=True,
+        # Note: previously we set page_size=100 + skip_failed_pages=True
+        # because the API 502'd on rows whose NOMBRE had bytes that
+        # Firebird couldn't transliterate from ISO8859_1 to WIN1252.
+        # The API now CASTs NOMBRE to OCTETS and decodes in Python
+        # (UTF-8 strict → cp1252 replace), so the workaround is gone.
+        # If a similar issue resurfaces on another column, set both
+        # overrides again and run `find-bad-articulos` to locate the
+        # specific rows.
     ),
     TableConfig(
         bq_table="dim_almacenes",
