@@ -7,6 +7,8 @@ import logging
 import re
 import tempfile
 import uuid
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from google.api_core.exceptions import NotFound
@@ -27,6 +29,14 @@ SYNC_STATE_SCHEMA = [
 # Regex for valid BigQuery table/dataset identifiers (prevent injection)
 _VALID_BQ_IDENTIFIER = re.compile(r"^[a-zA-Z0-9_]+$")
 
+# Pairs of types that can be promoted to a wider common type.
+# Anything not listed promotes to STRING (safe catch-all).
+_TYPE_PROMOTION = {
+    frozenset(["BOOLEAN", "INTEGER"]): "INTEGER",
+    frozenset(["INTEGER", "FLOAT"]): "FLOAT",
+    frozenset(["DATE", "TIMESTAMP"]): "TIMESTAMP",
+}
+
 
 def _validate_identifier(name: str, label: str = "identifier") -> str:
     """Validate that a BigQuery identifier contains only safe characters."""
@@ -36,6 +46,67 @@ def _validate_identifier(name: str, label: str = "identifier") -> str:
             "Only alphanumeric characters and underscores are allowed."
         )
     return name
+
+
+def _detect_value_type(value) -> str | None:
+    """Return BigQuery type string for a Python value, or None if null."""
+    if value is None:
+        return None
+    # Check bool BEFORE int — in Python, bool is a subclass of int
+    if isinstance(value, bool):
+        return "BOOLEAN"
+    if isinstance(value, int):
+        return "INTEGER"
+    if isinstance(value, (float, Decimal)):
+        return "FLOAT"
+    # Check datetime BEFORE date — datetime is a subclass of date
+    if isinstance(value, datetime):
+        return "TIMESTAMP"
+    if isinstance(value, date):
+        return "DATE"
+    # str, bytes, or anything else → STRING
+    return "STRING"
+
+
+def _promote_type(a: str, b: str) -> str:
+    """Return the widest compatible type between two observed types."""
+    if a == b:
+        return a
+    return _TYPE_PROMOTION.get(frozenset([a, b]), "STRING")
+
+
+def infer_schema(rows: list[dict]) -> list[SchemaField]:
+    """Infer a BigQuery schema by scanning ALL rows in the batch.
+
+    More reliable than BigQuery's autodetect because:
+      - Autodetect only samples the first ~100 rows, so rare values
+        (like a decimal buried in an otherwise-integer column) cause
+        late failures during load. This scans every row.
+      - Handles Python Decimal → FLOAT, which json.dumps would
+        otherwise serialize as a string and confuse autodetect.
+      - Promotes int/float correctly and falls back to STRING for
+        genuinely mixed types (e.g. '5100' and '5100.2' are both
+        strings, so the column is STRING — correct for account codes).
+
+    All fields are NULLABLE by default (Microsip data has many nulls).
+    """
+    types: dict[str, str | None] = {}
+    for row in rows:
+        for key, value in row.items():
+            observed = _detect_value_type(value)
+            if observed is None:
+                types.setdefault(key, None)
+                continue
+            current = types.get(key)
+            types[key] = observed if current is None else _promote_type(
+                current, observed
+            )
+
+    # Columns that were all-null default to STRING (safe default)
+    return [
+        SchemaField(name, bq_type or "STRING")
+        for name, bq_type in types.items()
+    ]
 
 
 class BigQueryLoader:
@@ -93,7 +164,8 @@ class BigQueryLoader:
         Args:
             table_name: Target BigQuery table name.
             rows: List of dicts to load.
-            schema: Optional explicit schema. If None, autodetect is used.
+            schema: Optional explicit schema. If None, schema is inferred
+                from the rows (scans all rows, not just a sample).
         """
         _validate_identifier(table_name, "table_name")
         if not rows:
@@ -101,13 +173,14 @@ class BigQueryLoader:
             return
 
         table_id = f"{self.dataset_ref}.{table_name}"
+        effective_schema = schema or infer_schema(rows)
         ndjson = self._rows_to_ndjson_file(rows)
 
         try:
             job_config = bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                 write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-                **({"schema": schema} if schema else {"autodetect": True}),
+                schema=effective_schema,
             )
 
             with open(ndjson, "rb") as f:
@@ -132,7 +205,8 @@ class BigQueryLoader:
         Args:
             table_name: Target BigQuery table name.
             rows: List of dicts to append.
-            schema: Optional explicit schema. If None, autodetect is used.
+            schema: Optional explicit schema. If None, schema is inferred
+                from the rows.
         """
         _validate_identifier(table_name, "table_name")
         if not rows:
@@ -140,13 +214,18 @@ class BigQueryLoader:
             return
 
         table_id = f"{self.dataset_ref}.{table_name}"
+        effective_schema = schema or infer_schema(rows)
         ndjson = self._rows_to_ndjson_file(rows)
 
         try:
             job_config = bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                 write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-                **({"schema": schema} if schema else {"autodetect": True}),
+                schema=effective_schema,
+                # New columns can appear between runs (Microsip upgrades)
+                schema_update_options=[
+                    bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION
+                ],
             )
 
             with open(ndjson, "rb") as f:
@@ -180,6 +259,7 @@ class BigQueryLoader:
         run_id = uuid.uuid4().hex[:8]
         staging_table = f"{self.dataset_ref}._staging_{table_name}_{run_id}"
 
+        staging_schema = infer_schema(rows)
         ndjson = self._rows_to_ndjson_file(rows)
 
         try:
@@ -187,7 +267,7 @@ class BigQueryLoader:
             job_config = bigquery.LoadJobConfig(
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
                 write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-                autodetect=True,
+                schema=staging_schema,
             )
             with open(ndjson, "rb") as f:
                 job = self.client.load_table_from_file(

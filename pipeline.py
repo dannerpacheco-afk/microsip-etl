@@ -13,7 +13,6 @@ from bq_loader import BigQueryLoader
 from schemas import (
     CATALOGS,
     EXISTENCIAS,
-    PV_TICKETS,
     SNAPSHOTS,
     VENTAS_DOCUMENTOS,
     VENTAS_ENDPOINTS,
@@ -61,7 +60,6 @@ class Pipeline:
         """Incremental load for transaction tables."""
         logger.info("--- Syncing transactions ---")
         self._sync_ventas_documentos()
-        self._sync_incremental(PV_TICKETS)
 
     def sync_snapshots(self):
         """Append snapshot tables (preserving historical data)."""
@@ -75,7 +73,12 @@ class Pipeline:
         """Extract all data from endpoint and full-refresh the BQ table."""
         try:
             logger.info("Syncing %s from %s", config.bq_table, config.endpoint)
-            rows = self.api.fetch_all(config.endpoint, config.api_params or None)
+            rows = self.api.fetch_all(
+                config.endpoint,
+                config.api_params or None,
+                page_size=config.page_size,
+                skip_failed_pages=config.skip_failed_pages,
+            )
             rows = self._add_synced_at(rows)
 
             self.loader.load_full_refresh(config.bq_table, rows)
@@ -153,7 +156,12 @@ class Pipeline:
                 "fecha_fin": fecha_fin.isoformat(),
             }
             params.update(config.api_params)
-            rows = self.api.fetch_all(config.endpoint, params)
+            rows = self.api.fetch_all(
+                config.endpoint,
+                params,
+                page_size=config.page_size,
+                skip_failed_pages=config.skip_failed_pages,
+            )
             rows = self._add_synced_at(rows)
 
             self.loader.load_incremental(
@@ -183,7 +191,12 @@ class Pipeline:
         """
         try:
             logger.info("Syncing %s from %s", config.bq_table, config.endpoint)
-            rows = self.api.fetch_all(config.endpoint, config.api_params or None)
+            rows = self.api.fetch_all(
+                config.endpoint,
+                config.api_params or None,
+                page_size=config.page_size,
+                skip_failed_pages=config.skip_failed_pages,
+            )
             today = date.today().isoformat()
             for row in rows:
                 row["_snapshot_date"] = today
