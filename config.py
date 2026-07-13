@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     # ETL behavior
     page_size: int = 500
     max_pages: int = 10_000  # safety valve against infinite pagination
-    initial_lookback_days: int = 30
+    # First run with no sync state pulls this many days back. 730 = ~24
+    # months, the BI window (see ANALISIS_BI.md). Keeps BigQuery storage
+    # small vs the 18-year history in Microsip.
+    initial_lookback_days: int = 730
     log_level: str = "INFO"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

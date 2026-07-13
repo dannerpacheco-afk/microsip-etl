@@ -68,12 +68,13 @@ CATALOGS: list[TableConfig] = [
 
 # --- Transaction tables (incremental by date) ---
 
-# All DOCTOS_VE types load into a single table
+# v1 scope (see ANALISIS_BI.md): only facturas + devoluciones = real net
+# sales. pedidos/cotizaciones/remisiones excluded — not needed for the
+# "sell more" dashboards (vendor ranking, clients-without-purchase,
+# monthly sales) and they inflate BigQuery scan/storage. Add back here if
+# an order-pipeline dashboard is needed later.
 VENTAS_ENDPOINTS = [
     ("/ventas/facturas", "F"),
-    ("/ventas/remisiones", "R"),
-    ("/ventas/pedidos", "P"),
-    ("/ventas/cotizaciones", "C"),
     ("/ventas/devoluciones", "D"),
 ]
 
@@ -86,16 +87,11 @@ VENTAS_DOCUMENTOS = TableConfig(
     clustering_fields=["TIPO_DOCTO", "CLIENTE_ID"],
 )
 
-PV_TICKETS = TableConfig(
-    bq_table="pv_tickets",
-    endpoint="/ventas/pv",
-    strategy="incremental",
-    primary_key="DOCTO_PV_ID",
-    partition_field="FECHA",
-    clustering_fields=["CAJA_ID"],
-)
+# NOTE: pv_tickets removed from v1 — the business has 0 point-of-sale
+# tickets (DOCTOS_PV is empty; it's a wholesale/invoice operation).
+# Re-add a TableConfig for "/ventas/pv" if PV is ever used.
 
-TRANSACTIONS: list[TableConfig] = [VENTAS_DOCUMENTOS, PV_TICKETS]
+TRANSACTIONS: list[TableConfig] = [VENTAS_DOCUMENTOS]
 
 # --- Snapshot tables (full refresh) ---
 

@@ -13,7 +13,6 @@ from bq_loader import BigQueryLoader
 from schemas import (
     CATALOGS,
     EXISTENCIAS,
-    PV_TICKETS,
     SNAPSHOTS,
     VENTAS_DOCUMENTOS,
     VENTAS_ENDPOINTS,
@@ -61,7 +60,6 @@ class Pipeline:
         """Incremental load for transaction tables."""
         logger.info("--- Syncing transactions ---")
         self._sync_ventas_documentos()
-        self._sync_incremental(PV_TICKETS)
 
     def sync_snapshots(self):
         """Append snapshot tables (preserving historical data)."""
