@@ -1,0 +1,22 @@
+# Microsip ETL on the API server.
+#
+#   cd /opt/microsip-etl
+#   docker compose -f deploy/docker-compose.yml build
+#   docker compose -f deploy/docker-compose.yml run --rm etl nightly
+#   docker compose -f deploy/docker-compose.yml run --rm etl backfill
+#
+# The service is under a profile so `docker compose up` never starts it;
+# cron runs it via deploy/run_nightly.sh.
+services:
+  etl:
+    build:
+      context: ..
+    image: microsip-etl:latest
+    env_file: ../.env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/credentials.json
+    volumes:
+      - ../credentials.json:/secrets/credentials.json:ro
+    # Same network namespace as the host: the API is http://localhost:8000
+    network_mode: host
+    profiles: ["manual"]

@@ -2,7 +2,7 @@
 # =====================================================
 # Usage:
 #   docker build -t microsip-etl .
-#   docker run --env-file .env microsip-etl [all|catalogs|transactions|snapshots]
+#   docker run --env-file .env microsip-etl [nightly|catalogs|facts|backfill ...]
 
 FROM python:3.12-slim AS base
 
@@ -16,8 +16,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY *.py .
+# Copy application code and SQL views
+COPY *.py ./
+COPY sql ./sql
 
 # Run as non-root user for security
 RUN groupadd --gid 1000 etl && \
@@ -25,4 +26,4 @@ RUN groupadd --gid 1000 etl && \
 USER etl
 
 ENTRYPOINT ["python", "main.py"]
-CMD ["all"]
+CMD ["nightly"]

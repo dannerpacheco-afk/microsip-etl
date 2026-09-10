@@ -1,0 +1,4 @@
+# crontab -e  (usuario con acceso a docker en el servidor de la API)
+MAILTO=sistemas@grupopacheco.mx
+# ETL Microsip → BigQuery, todas las noches 02:30 hora del servidor
+30 2 * * * /opt/microsip-etl/deploy/run_nightly.sh >> /opt/microsip-etl/logs/cron.log 2>&1

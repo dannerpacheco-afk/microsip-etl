@@ -1,3 +1,5 @@
+> **Nota (2026-09-10):** este documento describe la versión 1. La versión 2 (endpoints `/etl`, hechos con esquema explícito, ventana rodante, snapshots idempotentes, vistas para Looker y deploy Docker+cron) está documentada en [README.md](README.md) y [PLAN_BI_V2.md](PLAN_BI_V2.md).
+
 # Microsip ETL — Contexto del Proyecto
 
 **Ubicación:** `microsip-etl/`

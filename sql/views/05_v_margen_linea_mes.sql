@@ -1,0 +1,19 @@
+-- Margen por línea de artículo y mes.
+CREATE OR REPLACE VIEW `{project}.{dataset}.v_margen_linea_mes` AS
+SELECT
+  v.EMPRESA,
+  DATE_TRUNC(v.FECHA, MONTH) AS MES,
+  a.LINEA_ARTICULO_ID,
+  l.NOMBRE AS LINEA,
+  l.GRUPO_LINEA_ID,
+  SUM(v.UNIDADES) AS UNIDADES,
+  SUM(v.IMPORTE_NETO) AS IMPORTE_NETO,
+  SUM(v.COSTO) AS COSTO,
+  SUM(v.UTILIDAD) AS UTILIDAD,
+  SAFE_DIVIDE(SUM(v.UTILIDAD), SUM(v.IMPORTE_NETO)) AS MARGEN_PCT,
+  COUNT(DISTINCT v.ARTICULO_ID) AS ARTICULOS_VENDIDOS,
+  COUNT(DISTINCT v.CLIENTE_ID) AS CLIENTES
+FROM `{project}.{dataset}.fact_ventas_articulo` v
+LEFT JOIN `{project}.{dataset}.dim_articulos` a ON a.ARTICULO_ID = v.ARTICULO_ID
+LEFT JOIN `{project}.{dataset}.dim_lineas` l ON l.LINEA_ARTICULO_ID = a.LINEA_ARTICULO_ID
+GROUP BY 1, 2, 3, 4, 5;

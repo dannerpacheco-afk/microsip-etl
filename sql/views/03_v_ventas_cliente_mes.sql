@@ -1,0 +1,25 @@
+-- Ventas netas por cliente, vendedor y mes. Ticket promedio = importe / facturas.
+CREATE OR REPLACE VIEW `{project}.{dataset}.v_ventas_cliente_mes` AS
+SELECT
+  v.EMPRESA,
+  DATE_TRUNC(v.FECHA, MONTH) AS MES,
+  v.CLIENTE_ID,
+  c.NOMBRE AS CLIENTE,
+  c.ESTATUS AS CLIENTE_ESTATUS,
+  v.VENDEDOR_ID,
+  ve.NOMBRE AS VENDEDOR,
+  SUM(v.IMPORTE_NETO) AS IMPORTE_NETO,
+  SUM(v.COSTO) AS COSTO,
+  SUM(v.UTILIDAD) AS UTILIDAD,
+  SAFE_DIVIDE(SUM(v.UTILIDAD), SUM(v.IMPORTE_NETO)) AS MARGEN_PCT,
+  COUNT(DISTINCT IF(v.TIPO_DOCTO = 'F', v.DOCTO_VE_ID, NULL)) AS FACTURAS,
+  COUNT(DISTINCT IF(v.TIPO_DOCTO = 'D', v.DOCTO_VE_ID, NULL)) AS DEVOLUCIONES,
+  COUNT(DISTINCT v.ARTICULO_ID) AS ARTICULOS_DISTINTOS,
+  SAFE_DIVIDE(
+    SUM(IF(v.TIPO_DOCTO = 'F', v.IMPORTE_NETO, 0)),
+    COUNT(DISTINCT IF(v.TIPO_DOCTO = 'F', v.DOCTO_VE_ID, NULL))
+  ) AS TICKET_PROMEDIO
+FROM `{project}.{dataset}.fact_ventas_articulo` v
+LEFT JOIN `{project}.{dataset}.dim_clientes` c ON c.CLIENTE_ID = v.CLIENTE_ID
+LEFT JOIN `{project}.{dataset}.dim_vendedores` ve ON ve.VENDEDOR_ID = v.VENDEDOR_ID
+GROUP BY 1, 2, 3, 4, 5, 6, 7;

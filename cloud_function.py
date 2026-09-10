@@ -1,4 +1,8 @@
-"""Cloud Function entry point for automated daily ETL runs.
+"""Cloud Function entry point (legacy, kept for compatibility).
+
+The supported deployment is Docker + cron on the API server (see deploy/).
+A Cloud Function is limited to 9 minutes, enough for the nightly run but
+not for a backfill.
 
 Deploy with:
     gcloud functions deploy microsip-etl --gen2 --runtime=python312 \
@@ -63,6 +67,9 @@ def etl_handler(request):
         settings.microsip_api_key,
         settings.page_size,
         settings.max_pages,
+        empresa=settings.microsip_empresa,
+        timeout=settings.request_timeout_seconds,
+        bulk_page_size=settings.bulk_page_size,
     ) as api, BigQueryLoader(
         settings.gcp_project_id, settings.bq_dataset, settings.bq_location
     ) as loader:
@@ -70,10 +77,21 @@ def etl_handler(request):
         loader.ensure_sync_state_table()
 
         state = SyncStateManager(loader.client, loader.dataset_ref)
-        pipeline = Pipeline(api, loader, state, settings.initial_lookback_days)
+        pipeline = Pipeline(
+            api,
+            loader,
+            state,
+            empresa=settings.microsip_empresa,
+            backfill_start=settings.backfill_start,
+            rolling_window_days=settings.rolling_window_days,
+            ventas_chunk_days=settings.ventas_chunk_days,
+            compras_chunk_days=settings.compras_chunk_days,
+            retention_days_facts=settings.retention_days_facts,
+            retention_days_snapshots=settings.retention_days_snapshots,
+        )
 
         try:
-            pipeline.run_all()
+            pipeline.run_nightly()
             return {"status": "success"}, 200
         except Exception as e:
             logger.exception("ETL pipeline failed")
