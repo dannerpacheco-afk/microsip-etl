@@ -261,6 +261,8 @@ def coerce_row(row: dict, schema: list[SchemaField]) -> dict:
     out: dict = {}
     for f in schema:
         value = row.get(f.name)
+        if isinstance(value, str) and f.field_type == "STRING":
+            value = value.strip()  # CHAR(n) columns arrive space-padded
         if value == "":
             value = None
         if value is not None and f.field_type in _DATETIME_TYPES:

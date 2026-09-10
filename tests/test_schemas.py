@@ -43,6 +43,11 @@ class TestCoerceRow:
     def test_empty_string_becomes_null(self):
         assert coerce_row({"ID": 1, "IMPORTE": ""}, self.schema)["IMPORTE"] is None
 
+    def test_string_columns_are_stripped(self):
+        schema = [SchemaField("UMED", "STRING")]
+        assert coerce_row({"UMED": "BULTO      "}, schema)["UMED"] == "BULTO"
+        assert coerce_row({"UMED": "   "}, schema)["UMED"] is None
+
     def test_datetime_uses_space_separator(self):
         out = coerce_row({"ID": 1, "MODIF": "2025-03-03T10:20:30"}, self.schema)
         assert out["MODIF"] == "2025-03-03 10:20:30"
