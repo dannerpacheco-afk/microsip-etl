@@ -192,6 +192,21 @@ El backfill (~20–40 min) corre en paralelo mientras se hacen vistas y Looker.
 6. **Cancelaciones**: la ventana rodante de 45 días las cubre; cancelaciones de más de 45 días atrás no se reflejan (aceptable, o correr un re-backfill mensual).
 7. **Precio de venta a proveedores**: decisión pendiente (piezas vs importe).
 
+## 11. Estado al 2026-09-10 (escenario B ejecutado)
+
+| Bloque | Estado | Detalle |
+|---|---|---|
+| Verificaciones | ✅ | Proc 19 s / semana; importe y devoluciones cuadran contra `DOCTOS_VE`; `UTILIDAD` también lleva `SIGNO`; llave única confirmada |
+| API | ✅ código | Rama `feat/etl-endpoints`, commit `e91b4c5`, 5 endpoints, 24 tests, ruff/mypy limpios. SQL validado contra Firebird real. **Falta:** push, PR, merge y deploy en el servidor |
+| ETL | ✅ código | Commits en `claude/microsip-looker-studio-api-965182`; 67 tests; imagen Docker construida. **Falta:** correr `ensure-tables`, `backfill`, `views` (bloqueado por credenciales GCP y por el deploy de la API) |
+| BigQuery | ⏸ | Service account `microsip-etl@lookerstudio-microsip` responde "account not found" (eliminada) y el login de gcloud expiró. Requiere `gcloud auth login`, `gcloud auth application-default login` y nueva service account/llave |
+| Deploy | ✅ archivos | `deploy/docker-compose.yml`, `deploy/run_nightly.sh`, `deploy/crontab.example`. **Falta:** instalar en el servidor tras el merge de la API |
+| Looker | ✅ guía | `docs/looker_studio.md` con ligas de creación y contenido por página. **Falta:** construir los reportes una vez cargados los datos |
+
+Hallazgo adicional: `/inventarios/existencias` devuelve filas de `SALDOS_IN`
+(deltas mensuales), no existencias; la tabla `inventario_existencias` v1
+estaba mal. v2 la recalcula desde `/etl/saldos-iniciales`.
+
 ## 10. Orden de ejecución sugerido
 1. Verificaciones 1 y 2 (15 min, solo lectura).
 2. API: rama + router + tests.
