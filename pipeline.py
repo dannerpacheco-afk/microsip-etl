@@ -209,6 +209,8 @@ class Pipeline:
             DIM_ARTICULO_PROVEEDOR,
             DIM_ARTICULO_CLAVES,
             DIM_FORMATO_VENTA,
+            VENTAS_DOCUMENTOS,
+            *CATALOGS,
         ]
         for config in explicit:
             self.loader.ensure_table(self._with_retention(config))
@@ -387,6 +389,7 @@ class Pipeline:
             config.primary_key,
             config.partition_field,
             config.clustering_fields,
+            schema=config.schema,
         )
         self.state.record_sync(state_key or config.bq_table, end, len(all_rows), "success")
 
