@@ -63,15 +63,124 @@ def _s(name: str, type_: str, mode: str = "NULLABLE") -> SchemaField:
     return SchemaField(name, type_, mode=mode)
 
 
-# --- Catalog tables (full refresh, autodetect) ---
+# --- Catalog tables (full refresh) ---
+# Explicit schemas with only the columns the views use. Autodetect broke on
+# dim_articulos: CUENTA_COSTO_VENTA was inferred INTEGER from "5100" and then
+# hit "5100.2". Unknown columns from the API are dropped (coerce_row +
+# ignore_unknown_values).
 
 CATALOGS: list[TableConfig] = [
-    TableConfig(bq_table="dim_clientes", endpoint="/clientes"),
-    TableConfig(bq_table="dim_articulos", endpoint="/articulos"),
-    TableConfig(bq_table="dim_proveedores", endpoint="/proveedores"),
-    TableConfig(bq_table="dim_almacenes", endpoint="/catalogos/almacenes"),
-    TableConfig(bq_table="dim_vendedores", endpoint="/catalogos/vendedores"),
-    TableConfig(bq_table="dim_lineas", endpoint="/catalogos/lineas"),
+    TableConfig(
+        bq_table="dim_clientes",
+        endpoint="/clientes",
+        schema=[
+            _s("CLIENTE_ID", "INT64", "REQUIRED"),
+            _s("NOMBRE", "STRING"),
+            _s("ESTATUS", "STRING"),
+            _s("CAUSA_SUSP", "STRING"),
+            _s("FECHA_SUSP", "DATE"),
+            _s("VENDEDOR_ID", "INT64"),
+            _s("COBRADOR_ID", "INT64"),
+            _s("TIPO_CLIENTE_ID", "INT64"),
+            _s("ZONA_CLIENTE_ID", "INT64"),
+            _s("COND_PAGO_ID", "INT64"),
+            _s("MONEDA_ID", "INT64"),
+            _s("PRECIO_EMPRESA_ID", "INT64"),
+            _s("LIMITE_CREDITO", "NUMERIC"),
+            _s("CONTACTO1", "STRING"),
+            _s("FECHA_HORA_CREACION", "DATETIME"),
+            _s("FECHA_HORA_ULT_MODIF", "DATETIME"),
+            *META_FIELDS,
+        ],
+    ),
+    TableConfig(
+        bq_table="dim_articulos",
+        endpoint="/articulos",
+        schema=[
+            _s("ARTICULO_ID", "INT64", "REQUIRED"),
+            _s("NOMBRE", "STRING"),
+            _s("ESTATUS", "STRING"),
+            _s("CAUSA_SUSP", "STRING"),
+            _s("FECHA_SUSP", "DATE"),
+            _s("LINEA_ARTICULO_ID", "INT64"),
+            _s("UNIDAD_VENTA", "STRING"),
+            _s("UNIDAD_COMPRA", "STRING"),
+            _s("CONTENIDO_UNIDAD_COMPRA", "NUMERIC"),
+            _s("PESO_UNITARIO", "NUMERIC"),
+            _s("ES_ALMACENABLE", "STRING"),
+            _s("ES_JUEGO", "STRING"),
+            _s("ES_IMPORTADO", "STRING"),
+            _s("ES_PRECIO_VARIABLE", "STRING"),
+            _s("DIAS_GARANTIA", "INT64"),
+            _s("FECHA_HORA_CREACION", "DATETIME"),
+            _s("FECHA_HORA_ULT_MODIF", "DATETIME"),
+            *META_FIELDS,
+        ],
+    ),
+    TableConfig(
+        bq_table="dim_proveedores",
+        endpoint="/proveedores",
+        schema=[
+            _s("PROVEEDOR_ID", "INT64", "REQUIRED"),
+            _s("NOMBRE", "STRING"),
+            _s("ESTATUS", "STRING"),
+            _s("RFC_CURP", "STRING"),
+            _s("TIPO_PROV_ID", "INT64"),
+            _s("COND_PAGO_ID", "INT64"),
+            _s("MONEDA_ID", "INT64"),
+            _s("CIUDAD_ID", "INT64"),
+            _s("ESTADO_ID", "INT64"),
+            _s("PAIS_ID", "INT64"),
+            _s("LIMITE_CREDITO", "NUMERIC"),
+            _s("EMAIL", "STRING"),
+            _s("TELEFONO1", "STRING"),
+            _s("CONTACTO1", "STRING"),
+            _s("EXTRANJERO", "STRING"),
+            _s("FECHA_HORA_CREACION", "DATETIME"),
+            _s("FECHA_HORA_ULT_MODIF", "DATETIME"),
+            *META_FIELDS,
+        ],
+    ),
+    TableConfig(
+        bq_table="dim_almacenes",
+        endpoint="/catalogos/almacenes",
+        schema=[
+            _s("ALMACEN_ID", "INT64", "REQUIRED"),
+            _s("NOMBRE", "STRING"),
+            _s("NOMBRE_ABREV", "STRING"),
+            _s("ES_PPAL", "STRING"),
+            _s("ES_PREDET", "STRING"),
+            _s("OCULTO", "STRING"),
+            _s("POBLACION", "STRING"),
+            _s("CIUDAD", "STRING"),
+            _s("ESTADO", "STRING"),
+            *META_FIELDS,
+        ],
+    ),
+    TableConfig(
+        bq_table="dim_vendedores",
+        endpoint="/catalogos/vendedores",
+        schema=[
+            _s("VENDEDOR_ID", "INT64", "REQUIRED"),
+            _s("NOMBRE", "STRING"),
+            _s("ES_PREDET", "STRING"),
+            _s("OCULTO", "STRING"),
+            *META_FIELDS,
+        ],
+    ),
+    TableConfig(
+        bq_table="dim_lineas",
+        endpoint="/catalogos/lineas",
+        schema=[
+            _s("LINEA_ARTICULO_ID", "INT64", "REQUIRED"),
+            _s("NOMBRE", "STRING"),
+            _s("CLAVE", "STRING"),
+            _s("GRUPO_LINEA_ID", "INT64"),
+            _s("ES_PREDET", "STRING"),
+            _s("OCULTO", "STRING"),
+            *META_FIELDS,
+        ],
+    ),
 ]
 
 DIM_ARTICULO_PROVEEDOR = TableConfig(
