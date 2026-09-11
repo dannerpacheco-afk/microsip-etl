@@ -1,6 +1,6 @@
 # Looker Studio: reportes sobre BigQuery
 
-Proyecto: `lookerstudio-microsip`. Dataset interno: `microsip`. Dataset de
+Proyecto: `lookerstudio-microsip-508301`. Dataset interno: `microsip`. Dataset de
 proveedores: `microsip_proveedores`. Looker se conecta **solo a vistas**.
 
 ## Reporte interno (3 páginas + estado)
@@ -10,11 +10,11 @@ Crear el reporte con las fuentes de datos ya ligadas usando la Linking API
 
 | Página | Vista | Liga |
 |---|---|---|
-| Ventas | `v_ventas_diarias_articulo` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip&ds.datasetId=microsip&ds.tableId=v_ventas_diarias_articulo |
-| Clientes | `v_ventas_cliente_mes`, `v_clientes_resumen` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip&ds.datasetId=microsip&ds.tableId=v_clientes_resumen |
-| Inventario | `v_inventario_actual`, `v_inventario_mensual`, `v_articulos_sin_movimiento` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip&ds.datasetId=microsip&ds.tableId=v_inventario_actual |
-| Compras | `v_compras_proveedor_mes`, `v_ultimo_costo_articulo` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip&ds.datasetId=microsip&ds.tableId=v_compras_proveedor_mes |
-| Estado ETL | `v_etl_estado` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip&ds.datasetId=microsip&ds.tableId=v_etl_estado |
+| Ventas | `v_ventas_diarias_articulo` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip-508301&ds.datasetId=microsip&ds.tableId=v_ventas_diarias_articulo |
+| Clientes | `v_ventas_cliente_mes`, `v_clientes_resumen` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip-508301&ds.datasetId=microsip&ds.tableId=v_clientes_resumen |
+| Inventario | `v_inventario_actual`, `v_inventario_mensual`, `v_articulos_sin_movimiento` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip-508301&ds.datasetId=microsip&ds.tableId=v_inventario_actual |
+| Compras | `v_compras_proveedor_mes`, `v_ultimo_costo_articulo` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip-508301&ds.datasetId=microsip&ds.tableId=v_compras_proveedor_mes |
+| Estado ETL | `v_etl_estado` | https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip-508301&ds.datasetId=microsip&ds.tableId=v_etl_estado |
 
 Dentro del reporte, "Agregar datos" para sumar las demás vistas de cada página.
 
@@ -56,7 +56,7 @@ Dentro del reporte, "Agregar datos" para sumar las demás vistas de cada página
    `inventario_actual_<id>`, `inventario_mensual_<id>` en
    `microsip_proveedores` y las autoriza sobre `microsip`).
 2. Crear la plantilla una sola vez con la liga:
-   `https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip&ds.datasetId=microsip_proveedores&ds.tableId=sellout_<id>`
+   `https://lookerstudio.google.com/reporting/create?ds.connector=bigQuery&ds.type=TABLE&ds.projectId=lookerstudio-microsip-508301&ds.datasetId=microsip_proveedores&ds.tableId=sellout_<id>`
    Páginas: Sell-out (serie mensual + tabla por artículo/almacén), Sell-in,
    Inventario (actual y cierre de mes).
 3. Para otro proveedor: "Hacer una copia" del reporte y cambiar cada fuente

@@ -28,7 +28,7 @@ Copia `.env.example` a `.env`. Variables clave:
 |---|---|---|
 | `MICROSIP_API_URL` | `http://localhost:8000/api/v1` | URL de la API |
 | `MICROSIP_EMPRESA` | `ALMACENES PACHECO` | header `X-Empresa` y columna `EMPRESA` |
-| `GCP_PROJECT_ID`, `BQ_DATASET` | `lookerstudio-microsip`, `microsip` | destino |
+| `GCP_PROJECT_ID`, `BQ_DATASET` | `lookerstudio-microsip-508301`, `microsip` | destino |
 | `BQ_DATASET_PROVEEDORES` | `microsip_proveedores` | vistas para proveedores |
 | `BACKFILL_START_DATE` / `BACKFILL_YEARS` | vacío / `3` | inicio del histórico |
 | `ROLLING_WINDOW_DAYS` | `45` | días que se recalculan cada noche |

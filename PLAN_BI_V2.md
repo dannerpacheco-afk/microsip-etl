@@ -199,7 +199,7 @@ El backfill (~20–40 min) corre en paralelo mientras se hacen vistas y Looker.
 | Verificaciones | ✅ | Proc 19 s / semana; importe y devoluciones cuadran contra `DOCTOS_VE`; `UTILIDAD` también lleva `SIGNO`; llave única confirmada |
 | API | ✅ código | Rama `feat/etl-endpoints`, commit `e91b4c5`, 5 endpoints, 24 tests, ruff/mypy limpios. SQL validado contra Firebird real. **Falta:** push, PR, merge y deploy en el servidor |
 | ETL | ✅ código | Commits en `claude/microsip-looker-studio-api-965182`; 67 tests; imagen Docker construida. **Falta:** correr `ensure-tables`, `backfill`, `views` (bloqueado por credenciales GCP y por el deploy de la API) |
-| BigQuery | ⏸ | Service account `microsip-etl@lookerstudio-microsip` responde "account not found" (eliminada) y el login de gcloud expiró. Requiere `gcloud auth login`, `gcloud auth application-default login` y nueva service account/llave |
+| BigQuery | ⏸ | Service account `microsip-etl@lookerstudio-microsip-508301` responde "account not found" (eliminada) y el login de gcloud expiró. Requiere `gcloud auth login`, `gcloud auth application-default login` y nueva service account/llave |
 | Deploy | ✅ archivos | `deploy/docker-compose.yml`, `deploy/run_nightly.sh`, `deploy/crontab.example`. **Falta:** instalar en el servidor tras el merge de la API |
 | Looker | ✅ guía | `docs/looker_studio.md` con ligas de creación y contenido por página. **Falta:** construir los reportes una vez cargados los datos |
 
