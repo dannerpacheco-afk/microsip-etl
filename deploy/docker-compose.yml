@@ -17,6 +17,8 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/credentials.json
     volumes:
       - ../credentials.json:/secrets/credentials.json:ro
+      # reporte-mensual writes the .xlsx here (mkdir -p reports && chown 1000 reports)
+      - ../reports:/app/reports
     # Same network namespace as the host: the API is http://localhost:8000
     network_mode: host
     profiles: ["manual"]

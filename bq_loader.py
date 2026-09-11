@@ -87,10 +87,12 @@ class BigQueryLoader:
         logger.info("Sync state table ready")
 
     def ensure_table(self, config: TableConfig):
-        """Create a fact table with explicit schema, partitioning and retention.
+        """Create a table with explicit schema, partitioning and retention.
 
-        If the table already exists only the partition expiration is
-        reconciled; schema changes are left to a manual migration.
+        If the table already exists, the partition expiration is reconciled
+        and columns present in ``config.schema`` but missing from the live
+        table are added as NULLABLE (BigQuery only allows additive changes;
+        type changes and drops are left to a manual migration).
         """
         if config.schema is None:
             return  # autodetect tables are created by the first load
@@ -129,6 +131,26 @@ class BigQueryLoader:
                 current_ms,
                 wanted_ms,
             )
+
+        self._add_missing_columns(existing, config.schema, table_id)
+
+    def _add_missing_columns(
+        self, existing: bigquery.Table, wanted: list[SchemaField], table_id: str
+    ) -> list[str]:
+        """Append schema columns absent from the live table (as NULLABLE)."""
+        live = {f.name.upper() for f in existing.schema}
+        missing = [f for f in wanted if f.name.upper() not in live]
+        if not missing:
+            return []
+        added = [
+            SchemaField(f.name, f.field_type, mode="NULLABLE", description=f.description)
+            for f in missing
+        ]
+        existing.schema = list(existing.schema) + added
+        self.client.update_table(existing, ["schema"])
+        names = [f.name for f in added]
+        logger.info("Added missing columns to %s: %s", table_id, ", ".join(names))
+        return names
 
     def _partitioning(self, config: TableConfig) -> bigquery.TimePartitioning | None:
         if not config.partition_field:

@@ -215,3 +215,46 @@ estaba mal. v2 la recalcula desde `/etl/saldos-iniciales`.
 5. Vistas BQ + Looker interno.
 6. Deploy cron en servidor.
 7. Vistas y reporte de proveedor piloto.
+
+## 12. Reporte ISCAM (2026-09-10)
+
+**Qué.** Excel mensual para ISCAM (empresa de datos de mercado) con ventas e
+inventario del mes anterior por producto: clave interna + código de barras,
+descripción, unidad, proveedor, piezas vendidas, importe **con impuestos**,
+existencia y valor al cierre de mes, con corte por formato de venta (default),
+zona o almacén. Comando `python main.py reporte-mensual [--mes YYYY-MM]
+[--corte formato|zona|almacen] [--salida DIR] [--sin-correo]`; cron el día 2
+a las 03:30 (`deploy/crontab.example`); correo opcional vía SMTP
+(`SMTP_*`, `REPORTE_ISCAM_TO`). Módulo `reporte_mensual.py` (openpyxl).
+
+**Fuentes nuevas en la API** (contratos fijos, rama `feat/etl-endpoints`):
+`/etl/ventas-articulo` ahora trae `IMPUESTOS` e `IMPORTE_TOTAL`;
+`/etl/claves-articulos` (keyset) → `dim_articulo_claves`;
+`/etl/catalogos-aux?tabla=tipos_clientes|zonas_clientes|sucursales|precios_empresa`
+→ `dim_tipos_clientes`, `dim_zonas_clientes`, `dim_sucursales`,
+`dim_precios_empresa`. Local: `config/formatos_venta.csv` → `dim_formato_venta`.
+
+**Vistas.** `v_articulo_claves` (clave principal + primera "Clave alterna"
+de 12-14 dígitos como código de barras), `v_tipos_clientes_formato` (regex
+del CSV sobre `TIPOS_CLIENTES.NOMBRE`), `v_iscam_ventas_mensual` (mes ×
+formato × zona × almacén × artículo) y `v_iscam_inventario_mensual`
+(`v_inventario_mensual` + claves + proveedor). `v_ventas_cliente_mes` gana
+`ZONA` / `FORMATO`. `bq_loader.ensure_table` agrega columnas faltantes como
+NULLABLE, así `IMPUESTOS` / `IMPORTE_TOTAL` no exigen migración manual
+(sí un re-backfill de `fact_ventas_articulo` para llenar el histórico).
+
+**Decisiones.**
+1. Ventas **netas** (facturas − devoluciones), igual que el resto del BI; la
+   nota va en la hoja Resumen.
+2. Inventario **a costo** (`VALOR_COSTO_FIN_MES` de `SALDOS_IN`), no a precio
+   de venta; existencia en unidades al cierre del mes.
+3. Corte por **formato** de venta como default, con zona y almacén
+   disponibles vía `--corte`. `TIPOS_CLIENTES` es el catálogo de rutas en
+   esta empresa; el mapeo tipo → formato vive en el CSV (editable sin código)
+   y los tipos administrativos (cobranza, fletes, deudores…) se excluyen con
+   `INCLUIR = false`. Solo hay una sucursal real ("Matriz").
+4. **Cajas no existen** como unidad en Microsip para esta empresa: se
+   reportan piezas (`UNIDADES`) más `UNIDAD_VENTA` del artículo.
+5. Código de barras = primera "Clave alterna" numérica de 12-14 dígitos
+   (GTIN primero); ~71 % de los artículos activos lo tienen, el resto sale en
+   blanco.

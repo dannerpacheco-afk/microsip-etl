@@ -2,3 +2,5 @@
 MAILTO=sistemas@grupopacheco.mx
 # ETL Microsip → BigQuery, todas las noches 02:30 hora del servidor
 30 2 * * * /opt/microsip-etl/deploy/run_nightly.sh >> /opt/microsip-etl/logs/cron.log 2>&1
+# Reporte ISCAM del mes anterior (.xlsx en reports/, correo si SMTP_* está configurado), día 2 a las 03:30
+30 3 2 * * ETL_TARGET=reporte-mensual /opt/microsip-etl/deploy/run_nightly.sh >> /opt/microsip-etl/logs/cron.log 2>&1

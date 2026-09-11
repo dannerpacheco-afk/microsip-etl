@@ -35,6 +35,9 @@ Copia `.env.example` a `.env`. Variables clave:
 | `VENTAS_CHUNK_DAYS`, `COMPRAS_CHUNK_DAYS` | `7`, `31` | tamaño de chunk del backfill |
 | `RETENTION_DAYS_FACTS`, `RETENTION_DAYS_SNAPSHOTS` | `1100`, `400` | expiración de particiones |
 | `PROVEEDORES_BI` | vacío | `PROVEEDOR_ID`s con vistas propias |
+| `FORMATOS_VENTA_CSV` | `config/formatos_venta.csv` | mapa tipo de cliente → formato de venta |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | vacío / `587` | correo del reporte ISCAM (opcional, STARTTLS) |
+| `REPORTE_ISCAM_TO` | vacío | destinatarios del reporte, separados por coma |
 
 ## Comandos
 
@@ -46,6 +49,8 @@ python main.py nightly                # corrida diaria (alias: all)
 python main.py catalogs | transactions | facts | saldos | snapshots
 python main.py views                  # vistas internas (sql/views)
 python main.py proveedores-views      # vistas por proveedor (sql/proveedores)
+python main.py reporte-mensual        # ISCAM del mes anterior → reports/ISCAM_<EMPRESA>_<YYYY-MM>.xlsx
+python main.py reporte-mensual --mes 2026-08 --corte zona --salida /tmp --sin-correo
 ```
 
 `nightly` corre: catálogos → encabezados de ventas (45 d, MERGE) → hechos (45 d,
@@ -60,24 +65,36 @@ proceso sale con código 1 si alguna falló (cron avisa por `MAILTO`).
 
 | Tabla | Fuente | Carga | Partición / retención |
 |---|---|---|---|
-| `fact_ventas_articulo` | `/etl/ventas-articulo` (proc `MARGEN_DOCTOS_PER_XD`, F − D, con costo) | reemplazo por rango de fechas | `FECHA` día, 1100 d |
+| `fact_ventas_articulo` | `/etl/ventas-articulo` (proc `MARGEN_DOCTOS_PER_XD`, F − D, con costo, `IMPUESTOS` e `IMPORTE_TOTAL`) | reemplazo por rango de fechas | `FECHA` día, 1100 d |
 | `fact_compras_partidas` | `/etl/compras-partidas` (C y D) | reemplazo por rango | `FECHA` día, 1100 d |
 | `fact_saldos_mensuales` | `/etl/saldos-mensuales` + saldo inicial | reemplazo por mes | `PERIODO` mes, sin expiración |
 | `inventario_existencias` | `/etl/saldos-iniciales?hasta=mes actual` | partición del día (idempotente) | `_snapshot_date`, 400 d |
 | `ventas_documentos` | `/ventas/{facturas,remisiones,pedidos,cotizaciones,devoluciones}` | MERGE por `DOCTO_VE_ID` | `FECHA` día |
 | `dim_articulo_proveedor` | `/etl/articulos-proveedores` | full refresh | — |
+| `dim_articulo_claves` | `/etl/claves-articulos` (clave principal, alternas = código de barras, SKU) | full refresh | cluster `ARTICULO_ID` |
+| `dim_tipos_clientes`, `dim_zonas_clientes`, `dim_sucursales`, `dim_precios_empresa` | `/etl/catalogos-aux?tabla=…` | full refresh | — |
+| `dim_formato_venta` | `config/formatos_venta.csv` (local) | full refresh | — |
 | `dim_articulos`, `dim_clientes`, `dim_proveedores`, `dim_almacenes`, `dim_vendedores`, `dim_lineas` | catálogos | full refresh | — |
 | `_etl_sync_state` | ETL | append | — |
 
 Todas las filas llevan `EMPRESA` y `_synced_at`. La tabla `pv_tickets` de la
 versión anterior ya no se carga (`DOCTOS_PV` está vacío); se puede borrar.
 
+`ensure-tables` (y cada `nightly`) agrega como NULLABLE las columnas que
+existan en `schemas.py` y falten en la tabla viva (p. ej. `IMPUESTOS`,
+`IMPORTE_TOTAL`). Las filas cargadas antes quedan en NULL en esas columnas
+hasta re-correr `backfill --tables fact_ventas_articulo` del rango deseado.
+
 ### Vistas internas (`sql/views`)
 
-`v_etl_estado`, `v_ventas_diarias_articulo`, `v_ventas_cliente_mes`,
-`v_clientes_resumen`, `v_margen_linea_mes`, `v_inventario_actual`,
-`v_inventario_mensual`, `v_compras_proveedor_mes`, `v_ultimo_costo_articulo`,
-`v_articulos_sin_movimiento`. Looker Studio se conecta a estas vistas.
+`v_etl_estado`, `v_ventas_diarias_articulo`, `v_ventas_cliente_mes` (ahora
+con `ZONA` y `FORMATO`), `v_clientes_resumen`, `v_margen_linea_mes`,
+`v_inventario_actual`, `v_inventario_mensual`, `v_compras_proveedor_mes`,
+`v_ultimo_costo_articulo`, `v_articulos_sin_movimiento`,
+`v_articulo_claves` (clave principal + código de barras por artículo),
+`v_tipos_clientes_formato` (tipo de cliente → zona / formato / incluir),
+`v_iscam_ventas_mensual` y `v_iscam_inventario_mensual` (base del reporte
+ISCAM). Looker Studio se conecta a estas vistas.
 
 ### Vistas para proveedores (`sql/proveedores`)
 
@@ -89,6 +106,50 @@ unitario. Las vistas quedan registradas como *authorized views* sobre
 `microsip`, así que al proveedor se le comparte únicamente su reporte de
 Looker (o acceso de lectura a sus vistas), nunca el dataset interno.
 
+## Reporte mensual ISCAM
+
+`python main.py reporte-mensual` genera el Excel que se entrega a ISCAM los
+primeros días de cada mes con las ventas del mes anterior:
+
+- **Ventas**: mes, corte (`--corte formato` por default; `zona` o `almacen`),
+  clave principal, código de barras, descripción, unidad, proveedor
+  predeterminado, piezas, importe sin impuestos, impuestos e importe con
+  impuestos. Ventas netas (facturas − devoluciones), solo tipos de cliente con
+  `INCLUIR = true`.
+- **Inventario**: existencia y valor a costo al cierre del mes por almacén y
+  artículo (`v_inventario_mensual`); se omiten renglones en cero.
+- **Resumen**: totales por corte, total general, totales de inventario,
+  fecha de generación y la nota "Ventas netas de devoluciones; importes en MXN".
+
+Archivo: `reports/ISCAM_<EMPRESA sin espacios>_<YYYY-MM>.xlsx` (`--salida`
+cambia el directorio; `reports/` está en `.gitignore`). `--mes YYYY-MM`
+elige otro mes. Si `SMTP_HOST`, `SMTP_FROM` y `REPORTE_ISCAM_TO` están
+configurados el archivo se envía por correo (STARTTLS); `--sin-correo` lo
+evita. Cron: `deploy/crontab.example` lo programa el día 2 a las 03:30
+(`ETL_TARGET=reporte-mensual deploy/run_nightly.sh`); en Docker el `.xlsx`
+queda en `reports/` del host (volumen en `docker-compose.yml`).
+
+### Formato de venta (`config/formatos_venta.csv`)
+
+En esta empresa `TIPOS_CLIENTES` funciona como catálogo de rutas / zonas
+("Z-1  MOSTRADOR SUSANA", "Z-7 JIMENEZ", "AUTOMAYOREO", "COBRANZA"…). El CSV
+mapea cada nombre a un formato con expresiones regulares (RE2, sin
+distinguir mayúsculas), evaluadas por `ORDEN`; gana la primera coincidencia y
+lo que no coincide queda como `Otros` con `INCLUIR = true`:
+
+```
+ORDEN,PATRON,FORMATO,INCLUIR
+10,^Z-1\s*MOSTRADOR,Tienda / Cash&Carry,true
+20,^AUTOMAYOREO,Cash&Carry,true
+30,COBRANZA|FLETES|DEUDORES|INCOBRABLES|CHEQUES|CHOFER|CONSUM INTERNO|BODEGA ATRASADOS,Excluir,false
+40,^Z-\d+,Mayoreo tradicional,true
+```
+
+Para cambiar el mapeo se edita el CSV (sin tocar código); `catalogs` /
+`nightly` lo recargan en `dim_formato_venta` y las vistas lo aplican al vuelo.
+`INCLUIR = false` saca ese tipo de cliente del reporte ISCAM (no de las vistas
+internas). `FORMATOS_VENTA_CSV` apunta a otra ruta si se necesita.
+
 ## Despliegue (Docker + cron en el servidor de la API)
 
 ```bash
@@ -99,7 +160,8 @@ docker compose -f deploy/docker-compose.yml build
 docker compose -f deploy/docker-compose.yml run --rm etl ensure-tables
 docker compose -f deploy/docker-compose.yml run --rm etl backfill      # ~1 h la primera vez
 docker compose -f deploy/docker-compose.yml run --rm etl views
-crontab -e                      # pegar deploy/crontab.example
+mkdir -p reports && chown 1000 reports   # salida del reporte ISCAM (uid del contenedor)
+crontab -e                      # pegar deploy/crontab.example (nightly + reporte-mensual)
 ```
 
 `deploy/run_nightly.sh` usa `flock` (una sola instancia), escribe
@@ -130,3 +192,10 @@ crontab -e                      # pegar deploy/crontab.example
   existencia, por eso no se usa.
 - **Inventario mensual** = saldo inicial (mes previo al backfill) + deltas
   mensuales; `v_inventario_mensual` rellena meses sin movimiento.
+- **Impuestos**: `IMPUESTOS` = IVA + IEPS por documento × artículo (con
+  `SIGNO`) e `IMPORTE_TOTAL` = `IMPORTE_NETO + IMPUESTOS`, calculados en la
+  API. El reporte ISCAM usa el importe con impuestos; el resto de las vistas
+  sigue en importe neto.
+- **Cajas**: Microsip no maneja cajas como unidad de venta en esta empresa;
+  el reporte ISCAM entrega piezas (`UNIDADES`) y la unidad de venta del
+  artículo.

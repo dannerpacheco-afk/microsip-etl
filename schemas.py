@@ -8,6 +8,8 @@ Catalog (dim_*) tables still use autodetect: they are small, fully
 refreshed every run, and their columns depend on the Microsip version.
 Fact tables use explicit schemas so MERGE / DELETE+INSERT never break on a
 type drift and NUMERIC values coming as strings from the API load correctly.
+``dim_articulo_claves`` and ``dim_formato_venta`` also use explicit schemas
+because views depend on their column types.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from google.cloud.bigquery import SchemaField
 FETCH_OFFSET = "offset"  # legacy skip/limit endpoints
 FETCH_KEYSET = "keyset"  # /etl endpoints with cursor/next_cursor
 FETCH_CHUNK = "chunk"  # /etl endpoints that return the whole chunk
+FETCH_CSV = "csv"  # local CSV under config/ (no API call)
 
 # --- Load strategies ---
 LOAD_FULL_REFRESH = "full_refresh"  # WRITE_TRUNCATE
@@ -95,6 +98,67 @@ DIM_ARTICULO_PROVEEDOR = TableConfig(
     ],
 )
 
+# Claves de artículo (CLAVES_ARTICULOS): clave principal, alternas, SKU.
+# Los códigos de barras viven como "Clave alterna" de 12-14 dígitos.
+DIM_ARTICULO_CLAVES = TableConfig(
+    bq_table="dim_articulo_claves",
+    endpoint="/etl/claves-articulos",
+    fetch=FETCH_KEYSET,
+    load=LOAD_FULL_REFRESH,
+    clustering_fields=["ARTICULO_ID"],
+    schema=[
+        _s("CLAVE_ARTICULO_ID", "INT64", "REQUIRED"),
+        _s("ARTICULO_ID", "INT64", "REQUIRED"),
+        _s("ROL_CLAVE_ART_ID", "INT64"),
+        _s("ROL", "STRING"),
+        _s("ES_PPAL", "STRING"),
+        _s("ES_GTIN", "STRING"),
+        _s("CLAVE_ARTICULO", "STRING"),
+        _s("CONTENIDO_EMPAQUE", "NUMERIC"),
+        *META_FIELDS,
+    ],
+)
+
+# Small auxiliary catalogs served whole by /etl/catalogos-aux?tabla=<name>
+# (no pagination). Autodetect: columns depend on the Microsip version.
+CATALOGOS_AUX_ENDPOINT = "/etl/catalogos-aux"
+
+
+def _catalogo_aux(bq_table: str, tabla: str) -> TableConfig:
+    return TableConfig(
+        bq_table=bq_table,
+        endpoint=CATALOGOS_AUX_ENDPOINT,
+        fetch=FETCH_CHUNK,
+        load=LOAD_FULL_REFRESH,
+        api_params={"tabla": tabla},
+    )
+
+
+# In this company TIPOS_CLIENTES is the sales route / zone catalog.
+CATALOGOS_AUX: list[TableConfig] = [
+    _catalogo_aux("dim_tipos_clientes", "tipos_clientes"),
+    _catalogo_aux("dim_zonas_clientes", "zonas_clientes"),
+    _catalogo_aux("dim_sucursales", "sucursales"),
+    _catalogo_aux("dim_precios_empresa", "precios_empresa"),
+]
+
+# Sales-format mapping maintained by the user in config/formatos_venta.csv:
+# PATRON is an RE2 regex matched (case-insensitively) against
+# dim_tipos_clientes.NOMBRE; the lowest ORDEN that matches wins.
+DIM_FORMATO_VENTA = TableConfig(
+    bq_table="dim_formato_venta",
+    endpoint="",  # local CSV, see pipeline.load_formatos_venta
+    fetch=FETCH_CSV,
+    load=LOAD_FULL_REFRESH,
+    schema=[
+        _s("ORDEN", "INT64", "REQUIRED"),
+        _s("PATRON", "STRING", "REQUIRED"),
+        _s("FORMATO", "STRING", "REQUIRED"),
+        _s("INCLUIR", "BOOL", "REQUIRED"),
+        *META_FIELDS,
+    ],
+)
+
 # --- Sales document headers (legacy endpoints, MERGE on DOCTO_VE_ID) ---
 
 VENTAS_ENDPOINTS = [
@@ -142,6 +206,8 @@ FACT_VENTAS_ARTICULO = TableConfig(
         _s("IMPORTE_NETO", "NUMERIC"),
         _s("COSTO", "NUMERIC"),
         _s("UTILIDAD", "NUMERIC"),
+        _s("IMPUESTOS", "NUMERIC"),  # IVA + IEPS por docto x articulo, con SIGNO
+        _s("IMPORTE_TOTAL", "NUMERIC"),  # IMPORTE_NETO + IMPUESTOS
         _s("MONEDA_ID", "INT64"),
         _s("TIPO_CAMBIO", "NUMERIC"),
         _s("FECHA_HORA_ULT_MODIF", "DATETIME"),
@@ -234,7 +300,8 @@ INVENTARIO_EXISTENCIAS = TableConfig(
 FACTS: list[TableConfig] = [FACT_VENTAS_ARTICULO, FACT_COMPRAS_PARTIDAS]
 ALL_TABLES: list[TableConfig] = (
     CATALOGS
-    + [DIM_ARTICULO_PROVEEDOR, VENTAS_DOCUMENTOS]
+    + CATALOGOS_AUX
+    + [DIM_ARTICULO_PROVEEDOR, DIM_ARTICULO_CLAVES, DIM_FORMATO_VENTA, VENTAS_DOCUMENTOS]
     + FACTS
     + [FACT_SALDOS_MENSUALES, INVENTARIO_EXISTENCIAS]
 )

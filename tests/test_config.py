@@ -83,3 +83,24 @@ class TestSettingsValidation:
             _env_file=None,
         )
         assert s.max_pages == 10_000
+
+
+class TestReportSettings:
+    def _s(self, **kw):
+        return Settings(microsip_api_key="real-key", gcp_project_id="p", _env_file=None, **kw)
+
+    def test_defaults(self):
+        s = self._s()
+        assert s.formatos_venta_csv == "config/formatos_venta.csv"
+        assert s.smtp_port == 587
+        assert s.smtp_configured is False
+        assert s.reporte_iscam_to_list == []
+
+    def test_recipients_and_configured(self):
+        s = self._s(smtp_host="mail.x.mx", smtp_from="etl@x.mx", reporte_iscam_to="a@x.mx, b@x.mx,")
+        assert s.reporte_iscam_to_list == ["a@x.mx", "b@x.mx"]
+        assert s.smtp_configured is True
+
+    def test_not_configured_without_from(self):
+        s = self._s(smtp_host="mail.x.mx", reporte_iscam_to="a@x.mx")
+        assert s.smtp_configured is False

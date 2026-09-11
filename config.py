@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     # `bq_dataset_proveedores`. Empty = none.
     proveedores_bi: str = ""
 
+    # Sales-format mapping (regex over TIPOS_CLIENTES.NOMBRE) loaded into
+    # dim_formato_venta on every catalog run. Relative paths resolve from the
+    # repo root. Edit the CSV to change the mapping; no code change needed.
+    formatos_venta_csv: str = "config/formatos_venta.csv"
+
+    # Monthly ISCAM report e-mail (optional). The report is sent only when
+    # smtp_host, smtp_from and reporte_iscam_to are all set.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    reporte_iscam_to: str = ""  # comma-separated recipients
+
     # extra=ignore: .env may carry variables for other tools (e.g.
     # GOOGLE_APPLICATION_CREDENTIALS, read by the BigQuery client itself).
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
@@ -108,6 +122,15 @@ class Settings(BaseSettings):
     @property
     def proveedores_bi_ids(self) -> list[int]:
         return [int(p) for p in self.proveedores_bi.split(",") if p.strip()]
+
+    @property
+    def reporte_iscam_to_list(self) -> list[str]:
+        return [a.strip() for a in self.reporte_iscam_to.split(",") if a.strip()]
+
+    @property
+    def smtp_configured(self) -> bool:
+        """True when the report can be e-mailed."""
+        return bool(self.smtp_host.strip() and self.smtp_from.strip() and self.reporte_iscam_to_list)
 
 
 settings = Settings()

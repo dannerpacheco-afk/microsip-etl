@@ -16,9 +16,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code and SQL views
+# Copy application code, SQL views and config (formatos_venta.csv)
 COPY *.py ./
 COPY sql ./sql
+COPY config ./config
 
 # Run as non-root user for security
 RUN groupadd --gid 1000 etl && \

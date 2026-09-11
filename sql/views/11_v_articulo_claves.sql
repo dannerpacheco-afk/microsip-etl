@@ -1,0 +1,60 @@
+-- Una fila por artículo con su clave principal, su código de barras (primera
+-- "Clave alterna" numérica de 12-14 dígitos, GTIN primero) y la primera
+-- clave alterna de cualquier tipo. Fuente: dim_articulo_claves (CLAVES_ARTICULOS).
+CREATE OR REPLACE VIEW `{project}.{dataset}.v_articulo_claves` AS
+WITH claves AS (
+  SELECT
+    EMPRESA,
+    CLAVE_ARTICULO_ID,
+    ARTICULO_ID,
+    ROL,
+    ES_PPAL,
+    ES_GTIN,
+    TRIM(CLAVE_ARTICULO) AS CLAVE_ARTICULO
+  FROM `{project}.{dataset}.dim_articulo_claves`
+  WHERE CLAVE_ARTICULO IS NOT NULL AND TRIM(CLAVE_ARTICULO) <> ''
+),
+articulos AS (
+  SELECT ARTICULO_ID, ANY_VALUE(EMPRESA) AS EMPRESA
+  FROM claves
+  GROUP BY 1
+),
+principal AS (
+  SELECT ARTICULO_ID, CLAVE_ARTICULO AS CLAVE_PRINCIPAL
+  FROM claves
+  WHERE ES_PPAL = 'S'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY ARTICULO_ID ORDER BY CLAVE_ARTICULO_ID) = 1
+),
+alternas AS (
+  SELECT
+    ARTICULO_ID,
+    CLAVE_ARTICULO_ID,
+    CLAVE_ARTICULO,
+    ES_GTIN,
+    REGEXP_CONTAINS(CLAVE_ARTICULO, r'^[0-9]{12,14}$') AS ES_BARRAS
+  FROM claves
+  WHERE UPPER(TRIM(ROL)) = 'CLAVE ALTERNA'
+),
+barras AS (
+  SELECT ARTICULO_ID, CLAVE_ARTICULO AS CODIGO_BARRAS
+  FROM alternas
+  WHERE ES_BARRAS
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY ARTICULO_ID ORDER BY IF(ES_GTIN = 'S', 0, 1), CLAVE_ARTICULO_ID
+  ) = 1
+),
+alterna AS (
+  SELECT ARTICULO_ID, CLAVE_ARTICULO AS CLAVE_ALTERNA
+  FROM alternas
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY ARTICULO_ID ORDER BY CLAVE_ARTICULO_ID) = 1
+)
+SELECT
+  a.EMPRESA,
+  a.ARTICULO_ID,
+  p.CLAVE_PRINCIPAL,
+  b.CODIGO_BARRAS,
+  al.CLAVE_ALTERNA
+FROM articulos a
+LEFT JOIN principal p ON p.ARTICULO_ID = a.ARTICULO_ID
+LEFT JOIN barras b ON b.ARTICULO_ID = a.ARTICULO_ID
+LEFT JOIN alterna al ON al.ARTICULO_ID = a.ARTICULO_ID;

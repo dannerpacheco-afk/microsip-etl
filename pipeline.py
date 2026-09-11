@@ -14,9 +14,12 @@ Two entry points:
 from __future__ import annotations
 
 import calendar
+import csv
 import logging
+import re
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 from google.api_core.exceptions import GoogleAPIError
@@ -24,8 +27,11 @@ from google.api_core.exceptions import GoogleAPIError
 from api_client import MicrosipClient
 from bq_loader import BigQueryLoader
 from schemas import (
+    CATALOGOS_AUX,
     CATALOGS,
+    DIM_ARTICULO_CLAVES,
     DIM_ARTICULO_PROVEEDOR,
+    DIM_FORMATO_VENTA,
     FACT_SALDOS_MENSUALES,
     FACTS,
     INVENTARIO_EXISTENCIAS,
@@ -41,6 +47,11 @@ from sync_state import SyncStateManager
 logger = logging.getLogger(__name__)
 
 _RECOVERABLE = (httpx.HTTPError, GoogleAPIError, RuntimeError)
+
+PROJECT_DIR = Path(__file__).resolve().parent
+DEFAULT_FORMATOS_VENTA_CSV = "config/formatos_venta.csv"
+_TRUE_VALUES = {"true", "1", "si", "sí", "s", "yes", "y", "t"}
+_FALSE_VALUES = {"false", "0", "no", "n", "f", ""}
 
 
 class PipelineError(Exception):
@@ -81,6 +92,72 @@ def month_last_day(d: date) -> int:
     return calendar.monthrange(d.year, d.month)[1]
 
 
+# --- Sales-format mapping (config/formatos_venta.csv) ---
+
+
+def _parse_bool(value: str | None, *, field: str, line: int) -> bool:
+    text = (value or "").strip().lower()
+    if text in _TRUE_VALUES:
+        return True
+    if text in _FALSE_VALUES:
+        return False
+    raise ValueError(f"formatos_venta.csv line {line}: {field}={value!r} is not a boolean")
+
+
+def resolve_project_path(path: str | Path) -> Path:
+    """Resolve a config path relative to the repo root unless it is absolute."""
+    p = Path(path)
+    return p if p.is_absolute() else PROJECT_DIR / p
+
+
+def load_formatos_venta(path: str | Path) -> list[dict]:
+    """Read config/formatos_venta.csv into dim_formato_venta rows.
+
+    Columns: ORDEN (int), PATRON (RE2 regex, validated with ``re``),
+    FORMATO (str), INCLUIR (bool). Blank lines and rows without PATRON are
+    skipped. Raises ValueError on malformed rows so the bad CSV never
+    reaches BigQuery.
+    """
+    csv_path = resolve_project_path(path)
+    rows: list[dict] = []
+    with open(csv_path, newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        required = {"ORDEN", "PATRON", "FORMATO", "INCLUIR"}
+        headers = {h.strip().upper() for h in (reader.fieldnames or [])}
+        if not required <= headers:
+            raise ValueError(
+                f"{csv_path}: header must contain {sorted(required)}, got {sorted(headers)}"
+            )
+        for line, raw in enumerate(reader, start=2):
+            row = {(k or "").strip().upper(): (v or "") for k, v in raw.items()}
+            patron = row["PATRON"].strip()
+            if not patron:
+                continue
+            try:
+                orden = int(row["ORDEN"].strip())
+            except ValueError as exc:
+                raise ValueError(f"{csv_path} line {line}: ORDEN={row['ORDEN']!r} is not an int") from exc
+            try:
+                re.compile(patron, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"{csv_path} line {line}: invalid PATRON {patron!r}: {exc}") from exc
+            formato = row["FORMATO"].strip()
+            if not formato:
+                raise ValueError(f"{csv_path} line {line}: FORMATO is empty")
+            rows.append(
+                {
+                    "ORDEN": orden,
+                    "PATRON": patron,
+                    "FORMATO": formato,
+                    "INCLUIR": _parse_bool(row["INCLUIR"], field="INCLUIR", line=line),
+                }
+            )
+    if not rows:
+        raise ValueError(f"{csv_path}: no mapping rows")
+    rows.sort(key=lambda r: r["ORDEN"])
+    return rows
+
+
 class Pipeline:
     """Orchestrates the ETL against one Microsip company."""
 
@@ -97,6 +174,7 @@ class Pipeline:
         retention_days_facts: int | None = 1100,
         retention_days_snapshots: int | None = 400,
         today: date | None = None,
+        formatos_venta_csv: str | Path = DEFAULT_FORMATOS_VENTA_CSV,
     ):
         self.api = api
         self.loader = loader
@@ -105,6 +183,7 @@ class Pipeline:
         self.backfill_start = backfill_start
         self.rolling_window_days = rolling_window_days
         self.today = today or date.today()
+        self.formatos_venta_csv = resolve_project_path(formatos_venta_csv)
         self.failures: list[str] = []
 
         # Per-table overrides from settings
@@ -124,7 +203,14 @@ class Pipeline:
 
     def ensure_tables(self):
         """Create/reconcile every explicit-schema table and its retention."""
-        for config in FACTS + [FACT_SALDOS_MENSUALES, INVENTARIO_EXISTENCIAS, DIM_ARTICULO_PROVEEDOR]:
+        explicit = FACTS + [
+            FACT_SALDOS_MENSUALES,
+            INVENTARIO_EXISTENCIAS,
+            DIM_ARTICULO_PROVEEDOR,
+            DIM_ARTICULO_CLAVES,
+            DIM_FORMATO_VENTA,
+        ]
+        for config in explicit:
             self.loader.ensure_table(self._with_retention(config))
 
     def run_nightly(self):
@@ -174,15 +260,11 @@ class Pipeline:
     # --- Steps ---
 
     def sync_catalogs(self):
-        """Full refresh all dimension tables."""
+        """Full refresh all dimension tables (API catalogs + local CSV)."""
         logger.info("--- Syncing catalogs ---")
-        for config in CATALOGS:
+        for config in CATALOGS + CATALOGOS_AUX + [DIM_ARTICULO_PROVEEDOR, DIM_ARTICULO_CLAVES]:
             self._guard(config.bq_table, self._sync_full_refresh, config)
-        self._guard(
-            DIM_ARTICULO_PROVEEDOR.bq_table,
-            self._sync_full_refresh,
-            DIM_ARTICULO_PROVEEDOR,
-        )
+        self._guard(DIM_FORMATO_VENTA.bq_table, self._sync_formatos_venta)
 
     def sync_transactions(self):
         """Sales document headers for the rolling window (MERGE)."""
@@ -262,11 +344,26 @@ class Pipeline:
     # --- Sync internals ---
 
     def _sync_full_refresh(self, config: TableConfig):
-        logger.info("Syncing %s from %s", config.bq_table, config.endpoint)
+        logger.info("Syncing %s from %s %s", config.bq_table, config.endpoint, config.api_params or "")
         if config.fetch == FETCH_KEYSET:
             rows = self.api.fetch_keyset(config.endpoint, config.api_params or None)
+        elif config.fetch == FETCH_CHUNK:
+            rows = self.api.fetch_chunk(config.endpoint, config.api_params)
         else:
             rows = self.api.fetch_all(config.endpoint, config.api_params or None)
+        rows = self._finalize(rows, config)
+        self.loader.load_full_refresh(config.bq_table, rows, config.schema)
+        self.state.record_sync(config.bq_table, self.today, len(rows), "success")
+
+    def _sync_formatos_venta(self):
+        """dim_formato_venta from config/formatos_venta.csv (full refresh)."""
+        config = DIM_FORMATO_VENTA
+        logger.info("Syncing %s from %s", config.bq_table, self.formatos_venta_csv)
+        try:
+            rows = load_formatos_venta(self.formatos_venta_csv)
+        except (OSError, ValueError) as exc:
+            # Recoverable: the rest of the catalogs must still run.
+            raise RuntimeError(f"{config.bq_table}: {exc}") from exc
         rows = self._finalize(rows, config)
         self.loader.load_full_refresh(config.bq_table, rows, config.schema)
         self.state.record_sync(config.bq_table, self.today, len(rows), "success")
