@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Reporte mensual ISCAM (Excel del mes anterior), día 2 de cada mes a las 03:30.
+  Instalar igual que el nightly, sustituyendo __ETL_DIR__.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.grupopacheco.microsip-etl.reporte-mensual</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__ETL_DIR__/deploy/run_nightly_mac.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ETL_TARGET</key>
+    <string>reporte-mensual</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>__ETL_DIR__</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key>
+    <integer>2</integer>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__ETL_DIR__/logs/launchd-reporte.log</string>
+  <key>StandardErrorPath</key>
+  <string>__ETL_DIR__/logs/launchd-reporte.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

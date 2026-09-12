@@ -167,6 +167,24 @@ crontab -e                      # pegar deploy/crontab.example (nightly + report
 `deploy/run_nightly.sh` usa `flock` (una sola instancia), escribe
 `logs/etl-YYYYMMDD.log` y conserva 30 días.
 
+## Despliegue en macOS (Mac mini, launchd, sin Docker)
+
+```bash
+git clone git@github.com:dannerpacheco-afk/microsip-etl.git ~/microsip-etl && cd ~/microsip-etl
+uv venv --python 3.12 .venv && uv pip install -p .venv/bin/python -r requirements.txt
+cp .env.example .env            # editar; copiar credentials.json de la service account
+.venv/bin/python main.py ensure-tables
+for j in nightly reporte-mensual; do
+  sed "s#__ETL_DIR__#$PWD#g" deploy/launchd/com.grupopacheco.microsip-etl.$j.plist \
+    > ~/Library/LaunchAgents/com.grupopacheco.microsip-etl.$j.plist
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grupopacheco.microsip-etl.$j.plist
+done
+```
+
+`deploy/run_nightly_mac.sh` es el equivalente de `run_nightly.sh` con el venv
+local (lock por `mkdir`, logs en `logs/`). Guía paso a paso para una sesión de
+Claude en la Mac mini: [docs/setup_mac_mini.md](docs/setup_mac_mini.md).
+
 ## Monitoreo
 
 - `v_etl_estado`: última corrida por tabla y horas transcurridas. Agregar

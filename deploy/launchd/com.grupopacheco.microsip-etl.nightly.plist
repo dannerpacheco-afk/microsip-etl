@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ETL Microsip → BigQuery, corrida nocturna 02:30.
+  Instalar (sustituye __ETL_DIR__ por la ruta real del repo):
+    sed "s#__ETL_DIR__#$PWD#g" deploy/launchd/com.grupopacheco.microsip-etl.nightly.plist \
+      > ~/Library/LaunchAgents/com.grupopacheco.microsip-etl.nightly.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grupopacheco.microsip-etl.nightly.plist
+  Probar ahora:
+    launchctl kickstart -k gui/$(id -u)/com.grupopacheco.microsip-etl.nightly
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.grupopacheco.microsip-etl.nightly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__ETL_DIR__/deploy/run_nightly_mac.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ETL_TARGET</key>
+    <string>nightly</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>__ETL_DIR__</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__ETL_DIR__/logs/launchd-nightly.log</string>
+  <key>StandardErrorPath</key>
+  <string>__ETL_DIR__/logs/launchd-nightly.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
